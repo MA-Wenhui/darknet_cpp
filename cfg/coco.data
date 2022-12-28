@@ -1,0 +1,8 @@
+classes = 80
+train = '/Users/mawenhui/Documents/darknet/data/coco/trainvalno5k.txt'
+valid  = '/Users/mawenhui/Documents/darknet/data/coco/5k.txt'
+#valid = 'data/coco_val_5k.list'
+names = '../data/coco.names'
+backup = '/Users/mawenhui/Documents/darknet/backup'
+eval = 'coco'
+

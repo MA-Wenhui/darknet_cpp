@@ -1,0 +1,7 @@
+.vscode
+.DS_Store
+.editorconfig
+build
+*.txt
+*.ipynb
+*.jpg
