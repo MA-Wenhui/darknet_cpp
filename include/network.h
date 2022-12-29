@@ -95,7 +95,7 @@ class Network {
         tensor_map_.at(l->index_) = b;
       }
       printf("layer%d: ", l->index_);
-      for (int i = 0; i < 10; i++) {
+      for (int i = 0; i < 0+10; i++) {
         printf("%f ", b.data_.get()[i]);
       }
       printf("\n");

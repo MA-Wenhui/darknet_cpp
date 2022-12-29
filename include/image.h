@@ -5,8 +5,10 @@
 
 #include <fstream>
 #include <memory>
-#include <string_view>
 #include <opencv2/opencv.hpp>
+#include <string_view>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 enum ImageFormat : uint8_t {
   BGR_F32,
@@ -88,81 +90,89 @@ Image resize_image(Image im, int w, int h)
     return resized;
 }
 
-
-Image load_image_cv(std::string filename, int channels) {
-    int flag = -1;
-    if (channels == 0) flag = -1;
-    else if (channels == 1) flag = 0;
-    else if (channels == 3) flag = 1;
-    else {
-        fprintf(stderr, "OpenCV can't force load with %d channels\n", channels);
+void rgbgr_image(Image im) {
+    int i;
+    for (i = 0; i < im.w_ * im.h_; ++i) {
+        float swap = im.data_[i];
+        im.data_[i] = im.data_[i + im.w_ * im.h_ * 2];
+        im.data_[i + im.w_ * im.h_ * 2] = swap;
     }
-    cv::Mat m = cv::imread(filename, flag);
-    if(m.empty()){
-      throw std::runtime_error("read img failed.");
-    }
-    Image im(m.cols, m.rows, m.channels());
-    cv::cvtColor(m, m, cv::COLOR_BGR2RGB);
+}
+Image load_image_stb(const char *filename, int channels)
+{
+    int w, h, c;
+    unsigned char *data = stbi_load(filename, &w, &h, &c, channels);
 
-    cv::Mat fimg(cv::Size(m.cols, m.rows), CV_32FC3);
-
-    for (int k = 0; k < m.channels(); k++) {
-      for (int i = 0; i < m.rows; i++) {
-            for (int j = 0; j < m.cols; j++) {
-                fimg.at<cv::Vec3f>(i, j)[k] = m.at<cv::Vec3b>(i, j)[k] / 255.0;
+    if(channels) c = channels;
+    int i,j,k;
+    Image im(w, h, c);
+    for(k = 0; k < c; ++k){
+        for(j = 0; j < h; ++j){
+            for(i = 0; i < w; ++i){
+                int dst_index = i + w*j + w*h*k;
+                int src_index = k + c*i + c*w*j;
+                im.data_[dst_index] = (float)data[src_index]/255.;
             }
-      }
+        }
     }
-    memcpy(im.data_.get(), fimg.data, fimg.dataend - fimg.datastart);
+    free(data);
+    return im;
+}
+Image load_image_cv(cv::Mat m, int channels) {
+
+    Image im(m.cols, m.rows, m.channels());
+
+    int h = m.rows;
+    int w = m.cols;
+    int c = m.channels();
+
+    for (int k = 0; k < c; ++k) {
+        for (int i = 0; i < h; ++i) {
+            for (int j = 0; j < w; ++j) {
+                im.data_[k * w * h + i * w + j] =
+                    m.at<cv::Vec3b>(i, j)[k] / 255.0;
+            }
+        }
+    }
+    rgbgr_image(im);
     return im;
 }
 
-Image load_image(std::string filename, int w, int h, int c)
+void fill_image(Image m, float s) {
+    int i;
+    for (i = 0; i < m.h_ * m.w_ * m.c_; ++i) m.data_[i] = s;
+}
+void embed_image(Image source, Image dest, int dx, int dy)
 {
-    Image out = load_image_cv(filename, c);
-
-    if((h && w) && (h != out.h_ || w != out.w_)){
-        Image resized = resize_image(out, w, h);
-        out = resized;
+    int x,y,k;
+    for(k = 0; k < source.c_; ++k){
+        for(y = 0; y < source.h_; ++y){
+            for(x = 0; x < source.w_; ++x){
+                float val = source.at(x,y,k);
+                dest.at(dx+x, dy+y, k) = val;
+            }
+        }
     }
-    return out;
+}
+Image letterbox_image(Image im, int w, int h)
+{
+    int new_w = im.w_;
+    int new_h = im.h_;
+    if (((float)w/im.w_) < ((float)h/im.h_)) {
+        new_w = w;
+        new_h = (im.h_ * w)/im.w_;
+    } else {
+        new_h = h;
+        new_w = (im.w_ * h)/im.h_;
+    }
+    Image resized = resize_image(im, new_w, new_h);
+    Image boxed(w, h, im.c_);
+    fill_image(boxed, .5);
+    //int i;
+    //for(i = 0; i < boxed.w*boxed.h*boxed.c; ++i) boxed.data[i] = 0;
+    embed_image(resized, boxed, (w-new_w)/2, (h-new_h)/2); 
+    return boxed;
 }
 
-
-
-std::shared_ptr<float[]> PrepareImage(cv::Mat im, int w, int h) {
-  int new_w = im.cols;
-  int new_h = im.rows;
-  if (((float)w / im.cols) < ((float)h / im.rows)) {
-    new_w = w;
-    new_h = (im.rows * w) / im.cols;
-  } else {
-    new_h = h;
-    new_w = (im.cols * h) / im.rows;
-  }
-  cv::Mat resized(cv::Size(new_w,new_h),CV_32FC3);
-
-  cv::resize(im,resized,cv::Size(new_w,new_h));
-
-  cv::Mat boxed(cv::Size(w, h), CV_32FC3);
-  for (int i = 0; i < boxed.rows; i++) {
-    for (int j = 0; j < boxed.cols; j++) {
-      boxed.at<cv::Vec3f>(i, j) = {0.5,0.5,0.5};
-    }
-  }
-
-  resized.copyTo(boxed(cv::Rect((boxed.cols - resized.cols) / 2,
-                                (boxed.rows - resized.rows) / 2, resized.cols,
-                                resized.rows)));
-
-  SPDLOG_DEBUG("prepare boxed Image type: {}, 32FC3: {}, 8UC3: {}",
-               boxed.type(), CV_32FC3, CV_8UC3);
-  cv::imwrite("boxed.jpg", boxed);
-  std::shared_ptr<float[]> ret(
-      new float[boxed.cols * boxed.rows * boxed.channels()]);
-
-  memcpy(ret.get(), boxed.data, (boxed.dataend - boxed.datastart));
-  return ret;
-}
 
 #endif

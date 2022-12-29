@@ -4,10 +4,11 @@
 #include <string_view>
 
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+#include <opencv2/opencv.hpp>
+
+#include "image.h"
 #include "network.h"
 #include "toml/toml.hpp"
-#include <opencv2/opencv.hpp>
-#include "image.h"
 
 auto read_names(std::string_view data_cfg) {
   std::string ret;
@@ -18,7 +19,7 @@ auto read_names(std::string_view data_cfg) {
 
 std::vector<std::string> get_coco_names(std::string name_file) {
   std::vector<std::string> ret;
-  std::cout<<std::string(name_file)<<std::endl;
+  std::cout << std::string(name_file) << std::endl;
   std::fstream fs(name_file, std::ios::in);
   std::string name = "";
   while (fs >> name) {
@@ -30,8 +31,7 @@ std::vector<std::string> get_coco_names(std::string name_file) {
   return ret;
 }
 
-int main(int argc, char **argv) {
-
+int main(int argc, char** argv) {
   spdlog::set_level(spdlog::level::debug);
   spdlog::set_pattern("[%t-%H:%M:%S] [%s:%#] [%^%l%$] %v");
 
@@ -41,46 +41,35 @@ int main(int argc, char **argv) {
       "/Users/mawenhui/Documents/darknet_cpp/cfg/yolov3.cfg.toml";
   std::string_view weightfile =
       "/Users/mawenhui/Documents/darknet/yolov3.weights";
-  std::string_view img_file =
-      "/Users/mawenhui/Documents/darknet/data/dog.jpg";
+  std::string img_file = "/Users/mawenhui/Documents/darknet/data/dog.jpg";
 
   auto coco_names = get_coco_names(read_names(data_cfg));
 
   Network net(cfgfile, weightfile, true);
   net.SetBatch(1);
 
-  cv::Mat origin_img =
-      cv::imread(std::string(img_file), cv::ImreadModes::IMREAD_COLOR);
-  cv::cvtColor(origin_img,origin_img,cv::COLOR_BGR2RGB);
-
-  //prepare net input
-  cv::Mat img(cv::Size(origin_img.cols,origin_img.rows),CV_32FC3);
-
-  for (int k = 0; k < origin_img.channels(); k++) {
-    for (int i = 0; i < origin_img.rows; i++) {
-      for (int j = 0; j < origin_img.cols; j++) {
-        img.at<cv::Vec3f>(i, j)[k] = origin_img.at<cv::Vec3b>(i, j)[k];
-      }
-    }
+  cv::Mat m = cv::imread(img_file, cv::IMREAD_COLOR);
+  if (m.empty()) {
+    throw std::runtime_error("read img failed.");
   }
-
-  auto prepared = PrepareImage(img, net.w_, net.h_);
-  Tensor<float> t(1, net.w_, net.h_, net.c_, NHWC, prepared);
-  t.toNCHW();
+  // Image origin_img = load_image_cv(m, 3);
+  Image origin_img = load_image_stb(img_file.c_str(), 3);
+  Image sized = letterbox_image(origin_img, net.w_, net.h_);
+  Tensor<float> t(1, net.w_, net.h_, net.c_, NCHW, sized.data_);
   net.Forward(t);
 
   // box resize to raw image
   int new_w = 0;
   int new_h = 0;
-  if (((float)net.w_ / origin_img.cols) < ((float)net.h_ / origin_img.rows)) {
+  if (((float)net.w_ / origin_img.w_) < ((float)net.h_ / origin_img.h_)) {
     new_w = net.w_;
-    new_h = (origin_img.rows * net.w_) / origin_img.cols;
+    new_h = (origin_img.h_ * net.w_) / origin_img.w_;
   } else {
     new_h = net.h_;
-    new_w = (origin_img.cols * net.h_) / origin_img.rows;
+    new_w = (origin_img.w_ * net.h_) / origin_img.h_;
   }
   SPDLOG_INFO("new_w: {}, new_h: {}, net.w_: {}, net.h_: {}, w: {}, h: {}",
-              new_w, new_h, net.w_, net.h_, origin_img.cols, origin_img.rows);
+              new_w, new_h, net.w_, net.h_, origin_img.w_, origin_img.h_);
   for (auto& det : net.detections_) {
     box& b = det.bbox;
     b.x = (b.x - (net.w_ - new_w) / 2. / net.w_) / ((float)new_w / net.w_);
@@ -117,15 +106,15 @@ int main(int argc, char **argv) {
                   *max_prob, det.sort_class);
       auto b = det.bbox;
 
-      int left = (b.x - b.w / 2.) * origin_img.cols;
-      int right = (b.x + b.w / 2.) * origin_img.cols;
-      int top = (b.y - b.h / 2.) * origin_img.rows;
-      int bot = (b.y + b.h / 2.) * origin_img.rows;
+      int left = (b.x - b.w / 2.) * origin_img.w_;
+      int right = (b.x + b.w / 2.) * origin_img.w_;
+      int top = (b.y - b.h / 2.) * origin_img.h_;
+      int bot = (b.y + b.h / 2.) * origin_img.h_;
 
-      cv::rectangle(origin_img, cv::Rect(left, top, right - left, bot - top),
+      cv::rectangle(m, cv::Rect(left, top, right - left, bot - top),
                     {0, 255, 0});
     }
   }
-  cv::imwrite("result.jpg", origin_img);
+  cv::imwrite("result.jpg", m);
   return 0;
 }

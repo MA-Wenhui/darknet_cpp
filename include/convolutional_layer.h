@@ -9,8 +9,8 @@ class Network;
 
 class ConvolutionalLayer : public Layer {
  public:
-  ConvolutionalLayer(const toml::table& config, int batch, int h,
-                     int w, int c, int adam)
+  ConvolutionalLayer(const toml::table& config, int batch, int h, int w, int c,
+                     int adam)
       : Layer(batch, h, w, c) {
     int n = get_config<int>(config, "filters", 1);
     int size = get_config<int>(config, "size", 1);
@@ -26,11 +26,32 @@ class ConvolutionalLayer : public Layer {
   }
   ~ConvolutionalLayer() {}
 
+  void normalize_cpu(float* x, float* mean, float* variance, int batch,
+                     int filters, int spatial) {
+    int b, f, i;
+    for (b = 0; b < batch; ++b) {
+      for (f = 0; f < filters; ++f) {
+        for (i = 0; i < spatial; ++i) {
+          int index = b * filters * spatial + f * spatial + i;
+          x[index] = (x[index] - mean[f]) / (sqrt(variance[f]) + .000001f);
+        }
+      }
+    }
+  }
+
   virtual void forward(Tensor<float>& input, Tensor<float>& output,
                        std::map<int, Tensor<float>> tensor_map) override {
+    // printf("input\n");
     // for (int i = 0; i < input.h_; i++) {
     //   for (int j = 0; j < input.w_; j++) {
     //     printf("%f ", input.data_.get()[i * input.w_ + j]);
+    //   }
+    //   printf("\n");
+    // }
+    // printf("weights\n");
+    // for (int i = 0; i < filter_num_; i++) {
+    //   for (int j = 0; j < c_ * size_ * size_; j++) {
+    //     printf("%f ", weights_[i * c_ * size_ * size_ + j]);
     //   }
     //   printf("\n");
     // }
@@ -44,18 +65,60 @@ class ConvolutionalLayer : public Layer {
       std::shared_ptr<float[]> b(new float[K * N]);
       memset(b.get(), 0, K * N * sizeof(float));
       if (size_ == 1) {
-        b = input.data_;
+        // b = input.data_;
+        memcpy(b.get(), input.data_.get(), K * N * sizeof(float));
       } else {
         im2col_cpu(input.data_.get(), c_, h_, w_, size_, stride_, pad_,
                    b.get());
       }
+      // float sumb = 0, suma = 0, sumc = 0;
+      // for (int j = 0; j < M * K; j++) {
+      //   suma += a[j];
+      // }
+      // printf("a!!!    %f\n", suma);
+      // for (int j = 0; j < K * N; j++) {
+      //   sumb += b[j];
+      // }
+      // printf("b!!!    %f\n", sumb);
+      // for (int j = 0; j < M * N; j++) {
+      //   sumc += output_ptr[j];
+      // }
+      // printf("c!!!    %f\n", sumc);
+
       // gemm_cpu(M, N, K, 1.0, a, K, b.get(), N, output_ptr, N);
-      gemm(0,0,M,N,K,1,a,K,b.get(),N,1,output_ptr,N);
+      gemm(0, 0, M, N, K, 1, a, K, b.get(), N, 1, output_ptr, N);
+      // sumb = 0, suma = 0, sumc = 0;
+      // for (int j = 0; j < M * K; j++) {
+      //   suma += a[j];
+      // }
+      // printf("a--    %f\n", suma);
+      // for (int j = 0; j < K * N; j++) {
+      //   sumb += b[j];
+      // }
+      // printf("b--    %f\n", sumb);
+      // for (int j = 0; j < M * N; j++) {
+      //   sumc += output_ptr[j];
+      // }
+      // printf("c--    %f\n", sumc);
     }
 
+    // printf("rolling_mean\n");
+    // for (int i = 0; i < out_c_; i++) {
+    //   printf("%f ", rolling_mean_[i]);
+    // }
+    // printf("\n");
+    // printf("rolling_variance\n");
+    // for (int i = 0; i < out_c_; i++) {
+    //   printf("%f ", rolling_variance_[i]);
+    // }
+    // printf("\n");
     // bach normalize
     if (batch_normalize_) {
       // do normalize
+
+      // normalize_cpu(output_ptr, rolling_mean_, rolling_variance_, batch_,
+      //               out_c_, out_h_ * out_w_);
+
       for (int n = 0; n < batch_; n++) {
         for (int c = 0; c < out_c_; c++) {
           auto m = rolling_mean_[c];
@@ -71,7 +134,7 @@ class ConvolutionalLayer : public Layer {
         }
       }
     } else {
-      //add bias only
+      // add bias only
       for (int n = 0; n < batch_; n++) {
         for (int c = 0; c < out_c_; c++) {
           auto b = biases_[c];
@@ -86,11 +149,11 @@ class ConvolutionalLayer : public Layer {
     // activate
     activate_array(output_ptr, output_length_ * batch_, activation_);
 
-
     output.batch_ = batch_;
     output.c_ = out_c_;
     output.h_ = out_h_;
     output.w_ = out_w_;
+    output.data_size_ = batch_ * out_c_ * out_h_ * out_w_;
   }
 
   virtual void backward() override {}
@@ -154,7 +217,6 @@ class ConvolutionalLayer : public Layer {
 
       rolling_mean_ = new float[filter_num_];
       rolling_variance_ = new float[filter_num_];
-
     }
 
     gflops_ =
@@ -174,7 +236,6 @@ class ConvolutionalLayer : public Layer {
   int pad_;
   int stride_;
   int filter_num_;
-  
 
   int bias_num_;
   float* biases_;

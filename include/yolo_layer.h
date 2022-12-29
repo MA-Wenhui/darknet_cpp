@@ -46,6 +46,7 @@ class YoloLayer : public Layer {
     output.c_ = out_c_;
     output.h_ = out_h_;
     output.w_ = out_w_;
+    output.data_size_ = batch_ * out_c_ * out_h_ * out_w_;
   }
   virtual void backward() {}
 

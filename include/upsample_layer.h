@@ -24,6 +24,7 @@ class UpsampleLayer : public Layer {
     output.c_ = out_c_;
     output.h_ = out_h_;
     output.w_ = out_w_;
+    output.data_size_ = batch_ * out_c_ * out_h_ * out_w_;
 
     for (int b = 0; b < input.batch_; b++) {
       for (int c = 0; c < input.c_; c++) {
